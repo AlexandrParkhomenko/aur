@@ -31,6 +31,4 @@ install -D -m755 "$srcdir"/${_pkgname}/gen/include/glad/glad.h "$pkgdir"/usr/inc
 install -D -m755 "$srcdir"/${_pkgname}/LICENSE "$pkgdir"/usr/share/licenses/glad-c-git/LICENSE
 ### Need integration with CMake
 install -D -m755 "$srcdir"/${_pkgname}/gladConfig.cmake "$pkgdir"/usr/lib/cmake/glad/gladConfig.cmake
-
-
 }
