@@ -1,0 +1,366 @@
+diff --git a/caffe-1.0/Makefile b/caffe-1.0/Makefile
+index 4d32416..96279e7 100644
+--- a/caffe-1.0/Makefile
++++ b/caffe-1.0/Makefile
+@@ -194,9 +194,17 @@ endif
+ ifeq ($(USE_OPENCV), 1)
+ 	LIBRARIES += opencv_core opencv_highgui opencv_imgproc
+ 
+-	ifeq ($(OPENCV_VERSION), 3)
++	ifeq ($(OPENCV_VERSION), $(filter $(OPENCV_VERSION), 3 4))
+ 		LIBRARIES += opencv_imgcodecs
+ 	endif
++	ifeq ($(OPENCV_VERSION), 4)
++		ifeq ($(USE_PKG_CONFIG), 1)
++			INCLUDE_DIRS += $(shell pkg-config opencv4 --cflags-only-I | sed 's/-I//g')
++		else
++			INCLUDE_DIRS += /usr/include/opencv4 /usr/local/include/opencv4
++			INCLUDE_DIRS += /usr/include/opencv4/opencv /usr/local/include/opencv4/opencv
++		endif
++	endif
+ 
+ endif
+ PYTHON_LIBRARIES ?= boost_python python2.7
+@@ -374,8 +382,8 @@ ifeq ($(BLAS), mkl)
+ 	BLAS_INCLUDE ?= $(MKLROOT)/include
+ 	BLAS_LIB ?= $(MKLROOT)/lib $(MKLROOT)/lib/intel64
+ else ifeq ($(BLAS), open)
+-	# OpenBLAS
+-	LIBRARIES += openblas
++	# blas
++	LIBRARIES += blas
+ else
+ 	# ATLAS
+ 	ifeq ($(LINUX), 1)
+@@ -419,7 +427,11 @@ LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
+ 
+ USE_PKG_CONFIG ?= 0
+ ifeq ($(USE_PKG_CONFIG), 1)
+-	PKG_CONFIG := $(shell pkg-config opencv --libs)
++	ifeq ($(OPENCV_VERSION), 4)
++		PKG_CONFIG := $(shell pkg-config opencv4 --libs)
++	else
++		PKG_CONFIG := $(shell pkg-config opencv --libs)
++	endif
+ else
+ 	PKG_CONFIG :=
+ endif
+diff --git a/caffe-1.0/Makefile.config.example b/caffe-1.0/Makefile.config.example
+index d552b38..ee5a9cd 100644
+--- a/caffe-1.0/Makefile.config.example
++++ b/caffe-1.0/Makefile.config.example
+@@ -17,7 +17,7 @@
+ #	possibility of simultaneous read and write
+ # ALLOW_LMDB_NOLOCK := 1
+ 
+-# Uncomment if you're using OpenCV 3
++# Uncomment and set accordingly if you're using OpenCV 3/4
+ # OPENCV_VERSION := 3
+ 
+ # To customize your choice of compiler, uncomment and set the following.
+@@ -46,17 +46,17 @@ CUDA_ARCH := -gencode arch=compute_20,code=sm_20 \
+ # BLAS choice:
+ # atlas for ATLAS (default)
+ # mkl for MKL
+-# open for OpenBlas
++# open for blas
+ BLAS := atlas
+-# Custom (MKL/ATLAS/OpenBLAS) include and lib directories.
++# Custom (MKL/ATLAS/blas) include and lib directories.
+ # Leave commented to accept the defaults for your choice of BLAS
+ # (which should work)!
+ # BLAS_INCLUDE := /path/to/your/blas
+ # BLAS_LIB := /path/to/your/blas
+ 
+-# Homebrew puts openblas in a directory that is not on the standard search path
+-# BLAS_INCLUDE := $(shell brew --prefix openblas)/include
+-# BLAS_LIB := $(shell brew --prefix openblas)/lib
++# Homebrew puts blas in a directory that is not on the standard search path
++# BLAS_INCLUDE := $(shell brew --prefix blas)/include
++# BLAS_LIB := $(shell brew --prefix blas)/lib
+ 
+ # This is required only if you will compile the matlab interface.
+ # MATLAB directory should contain the mex binary in /bin.
+diff --git a/caffe-1.0/cmake/Dependencies.cmake b/caffe-1.0/cmake/Dependencies.cmake
+index 4a5bac4..b6cd817 100644
+--- a/caffe-1.0/cmake/Dependencies.cmake
++++ b/caffe-1.0/cmake/Dependencies.cmake
+@@ -114,9 +114,9 @@ if(NOT APPLE)
+     list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${Atlas_INCLUDE_DIR})
+     list(APPEND Caffe_LINKER_LIBS PUBLIC ${Atlas_LIBRARIES})
+   elseif(BLAS STREQUAL "Open" OR BLAS STREQUAL "open")
+-    find_package(OpenBLAS REQUIRED)
+-    list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${OpenBLAS_INCLUDE_DIR})
+-    list(APPEND Caffe_LINKER_LIBS PUBLIC ${OpenBLAS_LIB})
++    find_package(blas REQUIRED)
++    list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${blas_INCLUDE_DIR})
++    list(APPEND Caffe_LINKER_LIBS PUBLIC ${blas_LIB})
+   elseif(BLAS STREQUAL "MKL" OR BLAS STREQUAL "mkl")
+     find_package(MKL REQUIRED)
+     list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${MKL_INCLUDE_DIR})
+diff --git a/caffe-1.0/cmake/Modules/FindLAPACK.cmake b/caffe-1.0/cmake/Modules/FindLAPACK.cmake
+index 9641c45..96929d7 100644
+--- a/caffe-1.0/cmake/Modules/FindLAPACK.cmake
++++ b/caffe-1.0/cmake/Modules/FindLAPACK.cmake
+@@ -95,14 +95,14 @@ if(BLAS_FOUND)
+     SET(LAPACK_INFO "mkl")
+   ENDIF()
+ 
+-  # OpenBlas
++  # blas
+   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
+     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+     check_function_exists("cheev_" OPEN_LAPACK_WORKS)
+     if(OPEN_LAPACK_WORKS)
+       SET(LAPACK_INFO "open")
+     else()
+-      message(STATUS "It seems OpenBlas has not been compiled with Lapack support")
++      message(STATUS "It seems blas has not been compiled with Lapack support")
+     endif()
+   endif()
+ 
+diff --git a/caffe-1.0/cmake/Modules/FindOpenBLAS.cmake b/caffe-1.0/cmake/Modules/FindOpenBLAS.cmake
+index a6512ae..c8d4d30 100644
+--- a/caffe-1.0/cmake/Modules/FindOpenBLAS.cmake
++++ b/caffe-1.0/cmake/Modules/FindOpenBLAS.cmake
+@@ -2,63 +2,63 @@
+ 
+ SET(Open_BLAS_INCLUDE_SEARCH_PATHS
+   /usr/include
+-  /usr/include/openblas
+-  /usr/include/openblas-base
++  /usr/include/blas
++  /usr/include/blas-base
+   /usr/local/include
+-  /usr/local/include/openblas
+-  /usr/local/include/openblas-base
+-  /opt/OpenBLAS/include
+-  $ENV{OpenBLAS_HOME}
+-  $ENV{OpenBLAS_HOME}/include
++  /usr/local/include/blas
++  /usr/local/include/blas-base
++  /opt/blas/include
++  $ENV{blas_HOME}
++  $ENV{blas_HOME}/include
+ )
+ 
+ SET(Open_BLAS_LIB_SEARCH_PATHS
+         /lib/
+-        /lib/openblas-base
++        /lib/blas-base
+         /lib64/
+         /usr/lib
+-        /usr/lib/openblas-base
++        /usr/lib/blas-base
+         /usr/lib64
+         /usr/local/lib
+         /usr/local/lib64
+-        /opt/OpenBLAS/lib
+-        $ENV{OpenBLAS}cd
+-        $ENV{OpenBLAS}/lib
+-        $ENV{OpenBLAS_HOME}
+-        $ENV{OpenBLAS_HOME}/lib
++        /opt/blas/lib
++        $ENV{blas}cd
++        $ENV{blas}/lib
++        $ENV{blas_HOME}
++        $ENV{blas_HOME}/lib
+  )
+ 
+-FIND_PATH(OpenBLAS_INCLUDE_DIR NAMES cblas.h PATHS ${Open_BLAS_INCLUDE_SEARCH_PATHS})
+-FIND_LIBRARY(OpenBLAS_LIB NAMES openblas PATHS ${Open_BLAS_LIB_SEARCH_PATHS})
++FIND_PATH(blas_INCLUDE_DIR NAMES cblas.h PATHS ${Open_BLAS_INCLUDE_SEARCH_PATHS})
++FIND_LIBRARY(blas_LIB NAMES blas PATHS ${Open_BLAS_LIB_SEARCH_PATHS})
+ 
+-SET(OpenBLAS_FOUND ON)
++SET(blas_FOUND ON)
+ 
+ #    Check include files
+-IF(NOT OpenBLAS_INCLUDE_DIR)
+-    SET(OpenBLAS_FOUND OFF)
+-    MESSAGE(STATUS "Could not find OpenBLAS include. Turning OpenBLAS_FOUND off")
++IF(NOT blas_INCLUDE_DIR)
++    SET(blas_FOUND OFF)
++    MESSAGE(STATUS "Could not find blas include. Turning blas_FOUND off")
+ ENDIF()
+ 
+ #    Check libraries
+-IF(NOT OpenBLAS_LIB)
+-    SET(OpenBLAS_FOUND OFF)
+-    MESSAGE(STATUS "Could not find OpenBLAS lib. Turning OpenBLAS_FOUND off")
++IF(NOT blas_LIB)
++    SET(blas_FOUND OFF)
++    MESSAGE(STATUS "Could not find blas lib. Turning blas_FOUND off")
+ ENDIF()
+ 
+-IF (OpenBLAS_FOUND)
+-  IF (NOT OpenBLAS_FIND_QUIETLY)
+-    MESSAGE(STATUS "Found OpenBLAS libraries: ${OpenBLAS_LIB}")
+-    MESSAGE(STATUS "Found OpenBLAS include: ${OpenBLAS_INCLUDE_DIR}")
+-  ENDIF (NOT OpenBLAS_FIND_QUIETLY)
+-ELSE (OpenBLAS_FOUND)
+-  IF (OpenBLAS_FIND_REQUIRED)
+-    MESSAGE(FATAL_ERROR "Could not find OpenBLAS")
+-  ENDIF (OpenBLAS_FIND_REQUIRED)
+-ENDIF (OpenBLAS_FOUND)
++IF (blas_FOUND)
++  IF (NOT blas_FIND_QUIETLY)
++    MESSAGE(STATUS "Found blas libraries: ${blas_LIB}")
++    MESSAGE(STATUS "Found blas include: ${blas_INCLUDE_DIR}")
++  ENDIF (NOT blas_FIND_QUIETLY)
++ELSE (blas_FOUND)
++  IF (blas_FIND_REQUIRED)
++    MESSAGE(FATAL_ERROR "Could not find blas")
++  ENDIF (blas_FIND_REQUIRED)
++ENDIF (blas_FOUND)
+ 
+ MARK_AS_ADVANCED(
+-    OpenBLAS_INCLUDE_DIR
+-    OpenBLAS_LIB
+-    OpenBLAS
++    blas_INCLUDE_DIR
++    blas_LIB
++    blas
+ )
+ 
+diff --git a/caffe-1.0/docs/install_apt.md b/caffe-1.0/docs/install_apt.md
+index ee2cd28..d23f5c2 100644
+--- a/caffe-1.0/docs/install_apt.md
++++ b/caffe-1.0/docs/install_apt.md
+@@ -14,7 +14,7 @@ The NVIDIA package tends to follow more recent library and driver versions, but
+ If installing from packages, install the library and latest driver separately; the driver bundled with the library is usually out-of-date.
+ This can be skipped for CPU-only installation.
+ 
+-**BLAS**: install ATLAS by `sudo apt-get install libatlas-base-dev` or install OpenBLAS by `sudo apt-get install libopenblas-dev` or MKL for better CPU performance.
++**BLAS**: install ATLAS by `sudo apt-get install libatlas-base-dev` or install blas by `sudo apt-get install libblas-dev` or MKL for better CPU performance.
+ 
+ **Python** (optional): if you use the default Python you will need to `sudo apt-get install` the `python-dev` package to have the Python headers for building the pycaffe interface.
+ 
+diff --git a/caffe-1.0/docs/install_apt_debian.md b/caffe-1.0/docs/install_apt_debian.md
+index 65fe709..a8c6ee5 100644
+--- a/caffe-1.0/docs/install_apt_debian.md
++++ b/caffe-1.0/docs/install_apt_debian.md
+@@ -114,7 +114,7 @@ You may encounter failure linking GCC-4.X object files against GCC-5 libraries.
+ 
+ ## Notes
+ 
+-* Consider re-compiling OpenBLAS locally with optimization flags for sake of
++* Consider re-compiling blas locally with optimization flags for sake of
+ performance. This is highly recommended for any kind of production use, including
+ academic research.
+ 
+diff --git a/caffe-1.0/docs/install_osx.md b/caffe-1.0/docs/install_osx.md
+index a2da82f..920c626 100644
+--- a/caffe-1.0/docs/install_osx.md
++++ b/caffe-1.0/docs/install_osx.md
+@@ -36,7 +36,7 @@ If using Anaconda Python, HDF5 is bundled and the `hdf5` formula can be skipped.
+     # without Python the usual installation suffices
+     brew install protobuf boost
+ 
+-**BLAS**: already installed as the [Accelerate / vecLib Framework](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man7/Accelerate.7.html). OpenBLAS and MKL are alternatives for faster CPU computation.
++**BLAS**: already installed as the [Accelerate / vecLib Framework](https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man7/Accelerate.7.html). blas and MKL are alternatives for faster CPU computation.
+ 
+ **Python** (optional): Anaconda is the preferred Python.
+ If you decide against it, please use Homebrew.
+diff --git a/caffe-1.0/docs/install_yum.md b/caffe-1.0/docs/install_yum.md
+index 842fbd6..e1d7e57 100644
+--- a/caffe-1.0/docs/install_yum.md
++++ b/caffe-1.0/docs/install_yum.md
+@@ -38,7 +38,7 @@ Note that glog does not compile with the most recent gflags version (2.1), so be
+ Install the library and latest driver separately; the driver bundled with the library is usually out-of-date.
+     + CentOS/RHEL/Fedora:
+ 
+-**BLAS**: install ATLAS by `sudo yum install atlas-devel` or install OpenBLAS or MKL for better CPU performance. For the Makefile build, uncomment and set `BLAS_LIB` accordingly as ATLAS is usually installed under `/usr/lib[64]/atlas`).
++**BLAS**: install ATLAS by `sudo yum install atlas-devel` or install blas or MKL for better CPU performance. For the Makefile build, uncomment and set `BLAS_LIB` accordingly as ATLAS is usually installed under `/usr/lib[64]/atlas`).
+ 
+ **Python** (optional): if you use the default Python you will need to `sudo yum install` the `python-devel` package to have the Python headers for building the pycaffe wrapper.
+ 
+diff --git a/caffe-1.0/docs/installation.md b/caffe-1.0/docs/installation.md
+index 42f1d0c..c80b0ec 100644
+--- a/caffe-1.0/docs/installation.md
++++ b/caffe-1.0/docs/installation.md
+@@ -34,7 +34,7 @@ Caffe has several dependencies:
+ * [CUDA](https://developer.nvidia.com/cuda-zone) is required for GPU mode.
+     * library version 7+ and the latest driver version are recommended, but 6.* is fine too
+     * 5.5, and 5.0 are compatible but considered legacy
+-* [BLAS](http://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms) via ATLAS, MKL, or OpenBLAS.
++* [BLAS](http://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms) via ATLAS, MKL, or blas.
+ * [Boost](http://www.boost.org/) >= 1.55
+ * `protobuf`, `glog`, `gflags`, `hdf5`
+ 
+@@ -68,8 +68,8 @@ There are several implementations of this library. The choice is yours:
+     1. Install MKL.
+     2. Set up MKL environment (Details: [Linux](https://software.intel.com/en-us/node/528499), [OS X](https://software.intel.com/en-us/node/528659)). Example: *source /opt/intel/mkl/bin/mklvars.sh intel64*
+     3. Set `BLAS := mkl` in `Makefile.config`
+-* [OpenBLAS](http://www.openblas.net/): free and open source; this optimized and parallel BLAS could require more effort to install, although it might offer a speedup.
+-    1. Install OpenBLAS
++* [blas](http://www.blas.net/): free and open source; this optimized and parallel BLAS could require more effort to install, although it might offer a speedup.
++    1. Install blas
+     2. Set `BLAS := open` in `Makefile.config`
+ 
+ ### Python and/or MATLAB Caffe (optional)
+--- a/caffe-1.0/scripts/travis/install-deps.sh
++++ b/caffe-1.0/scripts/travis/install-deps.sh
+@@ -16,7 +16,7 @@ apt-get install -y --no-install-recommends \
+   libgflags-dev \
+   libgoogle-glog-dev \
+   libhdf5-serial-dev \
+-  libopenblas-dev \
++  libblas-dev \
+   python-virtualenv \
+   wget
+ 
+diff --git a/caffe-1.0/src/caffe/layers/window_data_layer.cpp b/caffe-1.0/src/caffe/layers/window_data_layer.cpp
+index 1bf3760..f41169d 100644
+--- a/caffe-1.0/src/caffe/layers/window_data_layer.cpp
++++ b/caffe-1.0/src/caffe/layers/window_data_layer.cpp
+@@ -290,7 +290,7 @@ void WindowDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
+           image_database_cache_[window[WindowDataLayer<Dtype>::IMAGE_INDEX]];
+         cv_img = DecodeDatumToCVMat(image_cached.second, true);
+       } else {
+-        cv_img = cv::imread(image.first, CV_LOAD_IMAGE_COLOR);
++        cv_img = cv::imread(image.first, cv::IMREAD_COLOR);
+         if (!cv_img.data) {
+           LOG(ERROR) << "Could not open or find file " << image.first;
+           return;
+diff --git a/caffe-1.0/src/caffe/test/test_io.cpp b/caffe-1.0/src/caffe/test/test_io.cpp
+index c2c919e..b80df28 100644
+--- a/caffe-1.0/src/caffe/test/test_io.cpp
++++ b/caffe-1.0/src/caffe/test/test_io.cpp
+@@ -20,8 +20,8 @@ class IOTest : public ::testing::Test {};
+ bool ReadImageToDatumReference(const string& filename, const int label,
+     const int height, const int width, const bool is_color, Datum* datum) {
+   cv::Mat cv_img;
+-  int cv_read_flag = (is_color ? CV_LOAD_IMAGE_COLOR :
+-    CV_LOAD_IMAGE_GRAYSCALE);
++  int cv_read_flag = (is_color ? cv::IMREAD_COLOR :
++    cv::IMREAD_GRAYSCALE);
+ 
+   cv::Mat cv_img_origin = cv::imread(filename, cv_read_flag);
+   if (!cv_img_origin.data) {
+diff --git a/caffe-1.0/src/caffe/util/io.cpp b/caffe-1.0/src/caffe/util/io.cpp
+index 835d2d4..941fd38 100644
+--- a/caffe-1.0/src/caffe/util/io.cpp
++++ b/caffe-1.0/src/caffe/util/io.cpp
+@@ -73,8 +73,8 @@ void WriteProtoToBinaryFile(const Message& proto, const char* filename) {
+ cv::Mat ReadImageToCVMat(const string& filename,
+     const int height, const int width, const bool is_color) {
+   cv::Mat cv_img;
+-  int cv_read_flag = (is_color ? CV_LOAD_IMAGE_COLOR :
+-    CV_LOAD_IMAGE_GRAYSCALE);
++  int cv_read_flag = (is_color ? cv::IMREAD_COLOR :
++    cv::IMREAD_GRAYSCALE);
+   cv::Mat cv_img_origin = cv::imread(filename, cv_read_flag);
+   if (!cv_img_origin.data) {
+     LOG(ERROR) << "Could not open or find file " << filename;
+@@ -179,8 +179,8 @@ cv::Mat DecodeDatumToCVMat(const Datum& datum, bool is_color) {
+   CHECK(datum.encoded()) << "Datum not encoded";
+   const string& data = datum.data();
+   std::vector<char> vec_data(data.c_str(), data.c_str() + data.size());
+-  int cv_read_flag = (is_color ? CV_LOAD_IMAGE_COLOR :
+-    CV_LOAD_IMAGE_GRAYSCALE);
++  int cv_read_flag = (is_color ? cv::IMREAD_COLOR :
++    cv::IMREAD_GRAYSCALE);
+   cv_img = cv::imdecode(vec_data, cv_read_flag);
+   if (!cv_img.data) {
+     LOG(ERROR) << "Could not decode datum ";
